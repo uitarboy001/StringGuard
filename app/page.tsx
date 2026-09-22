@@ -44,12 +44,12 @@ export default function LocalizationWorkspace() {
 
   const [items, setItems] = useState<StringItem[]>(initialDemo);
   const [filterErrorOnly, setFilterErrorOnly] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [isDragging, setIsDragging] = useState(false);
   const [activeFileName, setActiveFileName] = useState<string>("demo_strings.csv");
   const [isMounted, setIsMounted] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // 1. โหลดข้อมูลเดิมจาก LocalStorage เมื่อเปิดเว็บขึ้นมาครั้งแรก
   useEffect(() => {
     setIsMounted(true);
     const savedData = localStorage.getItem("l10n_saved_items");
@@ -58,15 +58,12 @@ export default function LocalizationWorkspace() {
       try {
         setItems(JSON.parse(savedData));
       } catch (err) {
-        console.error("Failed to parse saved strings:", err);
+        console.error("Failed to parse local storage strings:", err);
       }
     }
-    if (savedName) {
-      setActiveFileName(savedName);
-    }
+    if (savedName) setActiveFileName(savedName);
   }, []);
 
-  // 2. เซฟข้อมูลลง LocalStorage อัตโนมัติทุกครั้งที่มีการพิมพ์หรือแก้ไฟล์
   useEffect(() => {
     if (isMounted) {
       localStorage.setItem("l10n_saved_items", JSON.stringify(items));
@@ -77,8 +74,7 @@ export default function LocalizationWorkspace() {
   const extractTokens = (text: string): string[] => {
     const bracketRegex = /\{[a-zA-Z0-9_]+\}/g;
     const printfRegex = /%[sdif]/g;
-    const matches = [...(text.match(bracketRegex) || []), ...(text.match(printfRegex) || [])];
-    return Array.from(new Set(matches));
+    return Array.from(new Set([...(text.match(bracketRegex) || []), ...(text.match(printfRegex) || [])]));
   };
 
   const validateString = (item: StringItem): ValidationResult => {
@@ -86,7 +82,6 @@ export default function LocalizationWorkspace() {
     const target = item.targetText || "";
     const missingTokens = sourceTokens.filter((token) => !target.includes(token));
     const isOverLimit = item.maxChars ? target.length > item.maxChars : false;
-
     return {
       hasError: missingTokens.length > 0 || isOverLimit,
       missingTokens,
@@ -128,9 +123,7 @@ export default function LocalizationWorkspace() {
 
         setItems(parsedItems);
       },
-      error: (error) => {
-        alert("Failed to parse CSV: " + error.message);
-      },
+      error: (error) => alert("Failed to parse CSV: " + error.message),
     });
   };
 
@@ -139,26 +132,19 @@ export default function LocalizationWorkspace() {
     setIsDragging(true);
   };
 
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
+  const handleDragLeave = () => setIsDragging(false);
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+    if (e.dataTransfer.files?.[0]) {
       const file = e.dataTransfer.files[0];
-      if (file.name.endsWith(".csv")) {
-        processCSV(file);
-      } else {
-        alert("Please upload a valid .csv file");
-      }
+      if (file.name.endsWith(".csv")) processCSV(file);
+      else alert("Please upload a .csv file");
     }
   };
 
-  const handleDownloadSampleCSV = (e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
-
+  const handleDownloadSampleCSV = () => {
     const sampleContent = `Key,Source,Target,MaxChars
 quest_accept,"Accept the quest from {npcName}?","Nimm die Quest von an?",35
 inv_full,"Inventory full! Cannot hold %d items.","Inventar voll! Kann Gegenstände nicht halten.",40
@@ -204,220 +190,241 @@ dialog_shop,"Buy {itemCount} potions for {price} gold?","Kaufe Tränke für Gold
     URL.revokeObjectURL(url);
   };
 
-  const displayItems = filterErrorOnly
-    ? items.filter((item) => validateString(item).hasError)
-    : items;
-
   const totalErrors = items.filter((i) => validateString(i).hasError).length;
 
+  const displayItems = items
+    .filter((item) => (filterErrorOnly ? validateString(item).hasError : true))
+    .filter((item) => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      return (
+        item.key.toLowerCase().includes(q) ||
+        item.sourceText.toLowerCase().includes(q) ||
+        item.targetText.toLowerCase().includes(q)
+      );
+    });
+
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-10 font-sans">
-      <div className="max-w-6xl mx-auto space-y-6">
-        
-        {/* Top Header */}
-        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-800 pb-6">
-          <div>
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className="min-h-screen bg-[#0b0c10] text-[#c9cbd1] font-sans text-xs antialiased selection:bg-neutral-700 selection:text-white relative"
+    >
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={(e) => e.target.files?.[0] && processCSV(e.target.files[0])}
+        accept=".csv"
+        className="hidden"
+      />
+
+      {/* Global Drag Overlay */}
+      {isDragging && (
+        <div className="fixed inset-0 z-50 bg-[#0b0c10]/90 backdrop-blur-sm border-2 border-dashed border-neutral-500 flex flex-col items-center justify-center pointer-events-none">
+          <svg className="w-12 h-12 text-neutral-400 mb-3 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+          <div className="text-sm font-medium text-neutral-200">Drop CSV file to load workspace</div>
+          <div className="text-xs text-neutral-500 mt-1">Client-side only • No file leaves your device</div>
+        </div>
+      )}
+
+      {/* Top Application Bar */}
+      <header className="border-b border-[#1b1d24] bg-[#0f1015]/80 backdrop-blur sticky top-0 z-40">
+        <div className="max-w-[1400px] mx-auto px-4 h-12 flex items-center justify-between gap-4">
+          
+          {/* Brand & Security Badge */}
+          <div className="flex items-center gap-3">
             <div className="flex items-center gap-2">
-              <span className="text-xl">⚡</span>
-              <h1 className="text-xl font-bold tracking-tight text-white">
+              <span className="w-2 h-2 rounded-full bg-neutral-400"></span>
+              <span className="font-semibold text-white tracking-tight text-[13px] font-mono">
                 StringGuard
-              </h1>
-              <span className="text-xs bg-emerald-500/20 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/30 font-medium">
-                100% In-Browser • Zero Leak
               </span>
             </div>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1">
-              Catch broken engine tokens, syntax bugs, and UI overflow before your game crashes.
-            </p>
+            <span className="h-3.5 w-px bg-neutral-800"></span>
+            <span className="text-[11px] text-neutral-500 hidden sm:inline-flex items-center gap-1.5 font-mono">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500/80 inline-block"></span>
+              Client Memory Only
+            </span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5">
-            <span className="text-[11px] text-slate-500 flex items-center gap-1 font-mono mr-1">
-              <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full inline-block"></span>
-              Auto-saved
-            </span>
+          {/* Actions Bar */}
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => handleDownloadSampleCSV()}
-              className="text-xs bg-slate-900 hover:bg-slate-800 text-slate-300 px-3 py-2 rounded-lg border border-slate-700 transition flex items-center gap-1.5"
+              onClick={() => fileInputRef.current?.click()}
+              className="h-7 px-2.5 rounded border border-[#252833] bg-[#14161f] hover:bg-[#1b1e2a] hover:border-neutral-700 text-neutral-300 font-medium transition flex items-center gap-1.5"
             >
-              <span>📥</span>
+              <svg className="w-3.5 h-3.5 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+              </svg>
+              <span>Import CSV</span>
+            </button>
+
+            <button
+              onClick={handleDownloadSampleCSV}
+              className="h-7 px-2.5 rounded border border-[#252833] bg-[#14161f] hover:bg-[#1b1e2a] hover:border-neutral-700 text-neutral-300 transition hidden md:inline-flex items-center gap-1.5"
+              title="Download sample localization file for testing"
+            >
+              <svg className="w-3.5 h-3.5 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+              </svg>
               <span>Sample CSV</span>
             </button>
+
             <button
               onClick={handleReset}
-              className="text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-2 rounded-lg border border-slate-700 transition"
+              className="h-7 px-2.5 rounded border border-[#252833] bg-[#14161f] hover:bg-[#1b1e2a] hover:border-neutral-700 text-neutral-400 hover:text-neutral-200 transition"
+              title="Reset workspace to default demo"
             >
-              Reset Demo
+              Reset
             </button>
+
             <button
               onClick={handleExportCSV}
-              className="text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2 rounded-lg shadow-lg shadow-blue-600/20 transition flex items-center gap-1.5"
+              className="h-7 px-3 rounded bg-neutral-100 hover:bg-white text-black font-semibold transition flex items-center gap-1.5 shadow-sm"
             >
-              <span>Export Clean CSV</span>
-              <span>↓</span>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+              </svg>
+              <span>Export CSV</span>
             </button>
           </div>
-        </header>
+        </div>
+      </header>
 
-        {/* Drag & Drop Upload Zone */}
-        <div
-          onDragOver={handleDragOver}
-          onDragLeave={handleDragLeave}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center cursor-pointer transition-all duration-200 ${
-            isDragging
-              ? "border-blue-500 bg-blue-500/10 scale-[0.99]"
-              : "border-slate-800 bg-slate-900/50 hover:border-slate-700 hover:bg-slate-900"
-          }`}
-        >
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={(e) => e.target.files?.[0] && processCSV(e.target.files[0])}
-            accept=".csv"
-            className="hidden"
-          />
-          <div className="flex flex-col items-center justify-center space-y-2">
-            <div className="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-lg text-blue-400">
-              📁
+      {/* Main Content Area */}
+      <main className="max-w-[1400px] mx-auto px-4 py-4 space-y-3">
+        
+        {/* Workspace Toolbar (Unified Search, Filtering, & Metadata) */}
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#111218] border border-[#1e2029] p-2 rounded-md">
+          
+          {/* Left: Quick Search & Filter Chips */}
+          <div className="flex items-center gap-2 flex-1 min-w-[280px]">
+            <div className="relative flex-1 max-w-xs">
+              <svg className="w-3.5 h-3.5 text-neutral-500 absolute left-2.5 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Filter keys or string content..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full h-7 pl-8 pr-2.5 bg-[#0b0c10] border border-[#232631] rounded text-[11px] text-neutral-200 placeholder-neutral-600 focus:outline-none focus:border-neutral-500"
+              />
             </div>
-            <div className="text-sm font-semibold text-slate-200">
-              Drag & Drop your localization <code className="text-blue-400">.csv</code> file here, or <span className="text-blue-400 underline">browse</span>
-            </div>
-            <p className="text-xs text-slate-500">
-              Current loaded file: <span className="text-slate-300 font-mono">{activeFileName}</span> (Processed entirely on your device)
-            </p>
-            
-            <div className="pt-2">
+
+            <div className="flex items-center bg-[#0b0c10] border border-[#232631] rounded p-0.5">
               <button
-                type="button"
-                onClick={handleDownloadSampleCSV}
-                className="text-xs text-blue-400 hover:text-blue-300 underline font-medium inline-flex items-center gap-1"
+                onClick={() => setFilterErrorOnly(false)}
+                className={`h-6 px-2.5 rounded text-[11px] font-medium transition ${
+                  !filterErrorOnly ? "bg-[#1f222e] text-white" : "text-neutral-400 hover:text-neutral-200"
+                }`}
               >
-                <span>Don't have a file? Download sample CSV to test</span>
-                <span>↗</span>
+                All ({items.length})
+              </button>
+              <button
+                onClick={() => setFilterErrorOnly(true)}
+                className={`h-6 px-2.5 rounded text-[11px] font-medium transition flex items-center gap-1.5 ${
+                  filterErrorOnly ? "bg-[#1f222e] text-white" : "text-neutral-400 hover:text-neutral-200"
+                }`}
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${totalErrors > 0 ? "bg-amber-400" : "bg-neutral-600"}`}></span>
+                Issues ({totalErrors})
               </button>
             </div>
           </div>
-        </div>
 
-        {/* Status Metrics */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
-            <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Total Strings</div>
-            <div className="text-2xl font-bold text-white mt-1">{items.length}</div>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
-            <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">Crash & Overflow Risks</div>
-            <div className={`text-2xl font-bold mt-1 ${totalErrors > 0 ? "text-rose-400" : "text-emerald-400"}`}>
-              {totalErrors} {totalErrors === 1 ? "Issue" : "Issues"}
-            </div>
-          </div>
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between">
-            <div>
-              <div className="text-xs text-slate-400 uppercase tracking-wider font-semibold">View Filter</div>
-              <div className="text-sm font-medium text-slate-200 mt-1">
-                {filterErrorOnly ? "Issues Only" : "All Strings"}
-              </div>
-            </div>
-            <button
-              onClick={() => setFilterErrorOnly(!filterErrorOnly)}
-              className={`text-xs px-3 py-1.5 rounded-lg border font-medium transition ${
-                filterErrorOnly
-                  ? "bg-rose-500/20 text-rose-300 border-rose-500/30"
-                  : "bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700"
-              }`}
-            >
-              {filterErrorOnly ? "Show All" : "Show Issues Only"}
-            </button>
+          {/* Right: File Indicator */}
+          <div className="flex items-center gap-2 text-[11px] text-neutral-500 font-mono">
+            <span>Buffer:</span>
+            <span className="text-neutral-300 bg-[#161822] px-2 py-0.5 rounded border border-[#222533]">
+              {activeFileName}
+            </span>
           </div>
         </div>
 
-        {/* Translation Table */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+        {/* Data Grid / Editor Table */}
+        <div className="border border-[#1e2029] rounded-md overflow-hidden bg-[#0e0f14]">
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-slate-800/80 text-slate-400 uppercase font-mono tracking-wider border-b border-slate-800">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-[#12141c] text-neutral-400 font-mono text-[11px] uppercase tracking-wider border-b border-[#1e2029]">
                 <tr>
-                  <th className="p-3.5 w-16 text-center">Status</th>
-                  <th className="p-3.5 w-48">Key</th>
-                  <th className="p-3.5 w-1/3">Source (EN)</th>
-                  <th className="p-3.5">Target Translation (Live Editable)</th>
+                  <th className="py-2 px-3 w-10 text-center font-normal">#</th>
+                  <th className="py-2 px-3 w-48 font-normal">Key identifier</th>
+                  <th className="py-2 px-3 w-[38%] font-normal">Source (Reference)</th>
+                  <th className="py-2 px-3 font-normal">Target Translation</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-800/60 font-mono">
+              <tbody className="divide-y divide-[#171922] font-mono text-[11px]">
                 {displayItems.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="p-8 text-center text-slate-500 font-sans">
-                      No strings match the selected filter.
+                    <td colSpan={4} className="py-12 text-center text-neutral-500 font-sans">
+                      No strings match the current criteria.
                     </td>
                   </tr>
                 ) : (
-                  displayItems.map((item) => {
+                  displayItems.map((item, idx) => {
                     const check = validateString(item);
                     return (
                       <tr
                         key={item.id}
-                        className={`hover:bg-slate-800/30 transition ${
-                          check.hasError ? "bg-rose-950/10" : ""
+                        className={`hover:bg-[#13151f] transition-colors ${
+                          check.hasError ? "bg-[#181114]/40" : ""
                         }`}
                       >
-                        <td className="p-3.5 text-center">
-                          {check.hasError ? (
-                            <span className="inline-block w-2.5 h-2.5 bg-rose-500 rounded-full animate-pulse" title="Issue detected" />
-                          ) : (
-                            <span className="inline-block w-2.5 h-2.5 bg-emerald-500 rounded-full" title="Valid" />
-                          )}
+                        {/* Index */}
+                        <td className="py-2.5 px-3 text-center text-neutral-600 select-none">
+                          {idx + 1}
                         </td>
 
-                        <td className="p-3.5 font-semibold text-slate-300">
-                          {item.key}
+                        {/* Key Identifier & Limits */}
+                        <td className="py-2.5 px-3 text-neutral-300 align-top">
+                          <div className="font-semibold text-neutral-200 select-all">{item.key}</div>
                           {item.maxChars && (
-                            <div className="text-[10px] text-slate-500 font-sans mt-0.5">
-                              Limit: {item.maxChars} chars
+                            <div className="text-[10px] text-neutral-500 mt-0.5 font-sans">
+                              Max {item.maxChars} chars
                             </div>
                           )}
                         </td>
 
-                        <td className="p-3.5 text-slate-300 leading-relaxed font-sans">
+                        {/* Source Text */}
+                        <td className="py-2.5 px-3 text-neutral-400 font-sans text-xs leading-relaxed align-top select-text">
                           {item.sourceText}
                         </td>
 
-                        <td className="p-3.5 space-y-2">
+                        {/* Target Input with Inline Issue Chips */}
+                        <td className="py-2.5 px-3 align-top space-y-1.5">
                           <input
                             type="text"
                             value={item.targetText}
                             onChange={(e) => handleTargetChange(item.id, e.target.value)}
-                            className={`w-full bg-slate-950 px-3 py-2 rounded-lg border font-sans text-sm focus:outline-none transition ${
+                            className={`w-full bg-[#0a0b0f] px-2.5 py-1.5 rounded border text-xs font-sans text-neutral-200 focus:outline-none transition-colors ${
                               check.hasError
-                                ? "border-rose-500/80 focus:border-rose-400 text-rose-200"
-                                : "border-slate-700 focus:border-blue-500 text-slate-200"
+                                ? "border-red-900/60 focus:border-red-600 bg-red-950/10"
+                                : "border-[#20232e] focus:border-neutral-500"
                             }`}
                           />
 
-                          <div className="flex flex-wrap gap-2 text-[11px] font-sans">
-                            {check.missingTokens.map((token) => (
-                              <span
-                                key={token}
-                                className="bg-rose-500/20 text-rose-300 px-2 py-0.5 rounded border border-rose-500/30 flex items-center gap-1"
-                              >
-                                ⚠️ Missing token: <strong className="font-mono">{token}</strong>
-                              </span>
-                            ))}
+                          {/* Error diagnostics */}
+                          {check.hasError && (
+                            <div className="flex flex-wrap gap-1.5 font-sans text-[10px]">
+                              {check.missingTokens.map((token) => (
+                                <span
+                                  key={token}
+                                  className="bg-red-950/50 text-red-400 border border-red-900/60 px-1.5 py-0.5 rounded font-mono"
+                                >
+                                  Missing token: <strong>{token}</strong>
+                                </span>
+                              ))}
 
-                            {check.isOverLimit && (
-                              <span className="bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30">
-                                ⚠️ Length overflow ({item.targetText.length}/{item.maxChars})
-                              </span>
-                            )}
-
-                            {!check.hasError && (
-                              <span className="text-emerald-400 text-[10px]">
-                                ✓ Clean & safe
-                              </span>
-                            )}
-                          </div>
+                              {check.isOverLimit && (
+                                <span className="bg-amber-950/50 text-amber-400 border border-amber-900/60 px-1.5 py-0.5 rounded">
+                                  Overflow ({item.targetText.length}/{item.maxChars})
+                                </span>
+                              )}
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
@@ -426,9 +433,25 @@ dialog_shop,"Buy {itemCount} potions for {price} gold?","Kaufe Tränke für Gold
               </tbody>
             </table>
           </div>
+
+          {/* Bottom Grid Status Bar */}
+          <div className="bg-[#101117] border-t border-[#1a1c26] px-3 py-1.5 text-[11px] text-neutral-500 flex items-center justify-between font-mono">
+            <div className="flex items-center gap-3">
+              <span>{displayItems.length} rows loaded</span>
+              <span>•</span>
+              <span className={totalErrors > 0 ? "text-amber-500" : "text-emerald-500"}>
+                {totalErrors} validation issues
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span>Encoding: UTF-8</span>
+              <span>•</span>
+              <span>Ready for Game Engine</span>
+            </div>
+          </div>
         </div>
 
-      </div>
+      </main>
     </div>
   );
 }
